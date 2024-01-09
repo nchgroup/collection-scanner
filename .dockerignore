@@ -3,5 +3,3 @@ node_modules
 newman
 run.sh
 package-lock.json
-input/*
-.DS_Store

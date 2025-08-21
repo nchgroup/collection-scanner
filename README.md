@@ -2,6 +2,25 @@
 
 [WIP] Postman collection scanner for busyman
 
+# Help
+
+```
+Usage: cli [options]
+
+Postman Collection Scanner
+
+Options:
+  -V, --version               output the version number
+  -c, --collection <type>     Path to the Postman collection
+  -e, --environment <type>    Path to the Postman environment
+  -A, --authorization <type>  Token to use for authentication
+  -x, --proxy <type>          Proxy to use for requests
+  -s, --scan <type>           Scan type, please choice: {run, extract-url, no-auth, cors}
+  -k, --insecure              Allow insecure server connections
+  -v, --verbose               Verbose output
+  -h, --help                  display help for command
+```
+
 # Install
 
 ```bash

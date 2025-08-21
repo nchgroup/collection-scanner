@@ -4,7 +4,6 @@ process.noDeprecation = true;
 const newman = require('newman');
 const program = require('commander');
 const colors = require('colors/safe');
-const HttpsProxyAgent = require('https-proxy-agent');
 
 const nameProject = "Postman Collection Scanner";
 
@@ -26,7 +25,7 @@ program
     .option('-c, --collection <type>', 'Path to the Postman collection')
     .option('-e, --environment <type>', 'Path to the Postman environment')
     .option('-A, --authorization <type>', 'Token to use for authentication')
-    .option('-x, --proxy <type>', 'Proxy to use for requests')
+    .option('-x, --proxy <type>', 'Proxy to use for requests (format: http://proxy:port or http://user:pass@proxy:port)')
     .option('-s, --scan <type>', 'Scan type, please choice: {run, extract-url, no-auth, cors}')
     .option('-k, --insecure', 'Allow insecure server connections')
     .option('-v, --verbose', 'Verbose output')
@@ -40,7 +39,6 @@ program
         config.verbose = cmdObj.verbose;
     })
     .parse(process.argv);
-
 
 const originalEmitWarning = process.emitWarning;
 process.emitWarning = (warning, type, code, ...args) => {
@@ -62,24 +60,58 @@ process.emitWarning = (warning, type, code, ...args) => {
     originalEmitWarning.call(process, warning, type, code, ...args);
 };
 
+// CONFIGURACIÓN DE PROXY SIMPLIFICADA (SOLO VARIABLES DE ENTORNO)
+function setupProxy() {
+    if (config.proxyURL) {
+        // Usar solo variables de entorno - método más confiable y sin dependencias extra
+        const proxyUrl = config.proxyURL;
+
+        // Configurar variables de entorno para HTTP y HTTPS
+        process.env.HTTP_PROXY = proxyUrl;
+        process.env.HTTPS_PROXY = proxyUrl;
+        process.env.http_proxy = proxyUrl;
+        process.env.https_proxy = proxyUrl;
+
+        if (config.verbose) {
+            console.log(colors.yellow(`[INFO] Proxy configurado via variables de entorno: ${proxyUrl}`));
+            console.log(colors.gray(`[DEBUG] HTTP_PROXY=${process.env.HTTP_PROXY}`));
+            console.log(colors.gray(`[DEBUG] HTTPS_PROXY=${process.env.HTTPS_PROXY}`));
+        }
+    }
+}
+
 // Proceso de configuración del proxy y el entorno
-const proxyAgent = config.proxyURL ? new HttpsProxyAgent(config.proxyURL) : undefined;
 const environmentFile = config.environmentPath ? config.environmentPath : undefined;
 
 if (config.insecureReq) {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 }
 
+// Configurar proxy antes de ejecutar Newman
+setupProxy();
+
 function handleErrorScan() {
     console.log(`${colors.red("[!] Invalid scan type")}, ${colors.yellow("please run command with --help flag to see available options")}`);
 }
 
-const handleRun = () => {
-    newman.run({
+// Función para crear la configuración base de Newman
+function getNewmanConfig() {
+    const config_newman = {
         collection: require(config.collectionFile),
         environment: environmentFile,
-        proxy: proxyAgent
-    })
+        insecure: config.insecureReq,
+        verbose: config.verbose
+    };
+
+    // NOTA: Ya no pasamos 'proxy' como parámetro a Newman
+    // porque Newman no lo soporta directamente. En su lugar,
+    // usamos las variables de entorno y agentes globales configurados arriba.
+
+    return config_newman;
+}
+
+const handleRun = () => {
+    newman.run(getNewmanConfig())
         .on('start', (err, args) => {
             if (err) {
                 console.error('Error al iniciar: ', err);
@@ -93,7 +125,7 @@ const handleRun = () => {
             }
             if (!args.response) {
                 console.log('No se recibió ninguna respuesta');
-                //return;
+                return;
             }
             console.log(`> ${args.request.method} ${args.request.url} - ${args.response.code} ${args.response.status}`);
         })
@@ -101,12 +133,12 @@ const handleRun = () => {
 
 const handleExtractURL = () => {
     const uniqueUrls = {};
-    newman.run({
-        collection: require(config.collectionFile),
-        environment: environmentFile,
-        proxy: proxyAgent
-    })
+    newman.run(getNewmanConfig())
         .on('request', (err, args) => {
+            if (err) {
+                console.error('Error en la solicitud: ', err);
+                return;
+            }
             const url = args.request.url.toString();
             uniqueUrls[url] = (uniqueUrls[url] || 0) + 1;
         })
@@ -117,11 +149,7 @@ const handleExtractURL = () => {
 }
 
 const handleNoAuth = () => {
-    newman.run({
-        collection: require(config.collectionFile),
-        environment: environmentFile,
-        proxy: proxyAgent
-    })
+    newman.run(getNewmanConfig())
         .on('start', (err, args) => {
             if (err) {
                 console.error(`Error al iniciar: ${err}`);
@@ -129,29 +157,32 @@ const handleNoAuth = () => {
             }
         })
         .on('request', (err, args) => {
-
             if (err) {
                 console.error(`Error en la respuesta: ${err}`);
                 return;
             }
 
+            // Filtrar headers de autorización existentes
             args.request.headers = args.request.headers.filter(header => header.key.toLowerCase() !== 'authorization');
 
             if (!Array.isArray(args.request.headers)) {
                 args.request.headers = [];
             }
 
-            if (config.token != "") {
+            // Agregar token personalizado si se proporciona
+            if (config.token && config.token !== "") {
                 args.request.headers.push({ key: "Authorization", value: config.token });
-            } if (config.token == undefined) {
-                args.request.headers = args.request.headers.filter(header => header.key.toLowerCase() !== 'authorization');
+            }
+
+            if (!args.response) {
+                console.log('[-] No se recibió ninguna respuesta');
+                return;
             }
 
             const responseCode = args.response.code;
             const responseStatus = args.response.status;
 
             // En el contexto de no-auth, códigos como 401, 403 son "buenos" resultados
-            // porque indican que la autenticación es requerida
             if (responseCode === 401 || responseCode === 403) {
                 console.log(colors.green(`+ ${responseCode} ${responseStatus}`));
                 console.log(`\t${args.request.url.toString()}`);
@@ -159,10 +190,8 @@ const handleNoAuth = () => {
                 // Códigos 2xx son "malos" en este contexto porque indican acceso sin auth
                 console.log(colors.red(`- ${responseCode} ${responseStatus}`));
 
-                // Busca el header de autorización
                 const authHeader = args.request.headers.find(header => header.key.toLowerCase() === 'authorization');
 
-                // Verifica si el header de autorización existe y tiene un valor
                 if (authHeader && authHeader.value !== "") {
                     console.log('\tcurl -X %s %s -H "Authorization: %s"', args.request.method, args.request.url.toString(), authHeader.value);
                 } else {
@@ -177,12 +206,14 @@ const handleNoAuth = () => {
 };
 
 const handleCors = () => {
-    newman.run({
-        collection: require(config.collectionFile),
-        environment: environmentFile,
-        proxy: proxyAgent
-    })
+    newman.run(getNewmanConfig())
         .on('request', (err, args) => {
+            if (err) {
+                console.error('Error en la solicitud: ', err);
+                return;
+            }
+
+            // Modificar el header Origin
             args.request.headers = args.request.headers.map(header => {
                 if (header.key.toLowerCase() === 'origin') {
                     return { key: "Origin", value: "https://evil.tld" };
@@ -191,25 +222,28 @@ const handleCors = () => {
                 }
             });
 
+            // Filtrar header de autorización existente
             const authHeader = args.request.headers.find(header => header.key.toLowerCase() === 'authorization');
-
             if (authHeader) {
                 args.request.headers = args.request.headers.filter(header => header !== authHeader);
             }
 
+            // Agregar token personalizado si se proporciona
             if (config.token) {
                 args.request.headers.push({ key: "Authorization", value: config.token });
             }
+
             if (!args.response) {
                 console.log('[-] No se recibió ninguna respuesta');
                 return;
             }
+
             const corsHeader = args.response.headers.find(header => header.key.toLowerCase() === 'access-control-allow-origin');
 
             if (corsHeader && corsHeader.value === 'https://evil.tld') {
-                console.log(`+ Potencial CORS en el endpoint: ${args.request.url}`);
+                console.log(colors.green(`+ Potencial CORS en el endpoint: ${args.request.url}`));
             } else {
-                console.log(`- No se encontró CORS en el endpoint: ${args.request.url}`);
+                console.log(colors.red(`- No se encontró CORS en el endpoint: ${args.request.url}`));
             }
         })
 };
@@ -226,18 +260,29 @@ function main() {
     // Ejecuta el escáner de la colección
     console.log(colors.bold("[+] Running " + nameProject + "\n"));
 
+    // Debug: mostrar configuración
+    if (config.verbose || config.proxyURL) {
+        console.log(colors.cyan("[DEBUG] Configuración:"));
+        console.log(colors.cyan(`  - Collection: ${config.collectionFile}`));
+        console.log(colors.cyan(`  - Environment: ${config.environmentPath}`));
+        console.log(colors.cyan(`  - Proxy: ${config.proxyURL || 'No configurado'}`));
+        console.log(colors.cyan(`  - Scan Type: ${config.scanType}`));
+        console.log(colors.cyan(`  - Insecure: ${config.insecureReq}`));
+        console.log("");
+    }
+
     // Obtiene la función de manejo para el tipo de escaneo proporcionado
     const handleScan = scanHandlers[config.scanType];
 
     if (handleScan) {
-        // Si se encontró una función de manejo, la ejecuta
         console.log(colors.green(`>>> Running collection scanner: ${config.scanType}`));
+        if (config.proxyURL && config.verbose) {
+            console.log(colors.yellow(`>>> Using proxy: ${config.proxyURL}`));
+        }
         handleScan();
     } else {
-        // Si no se encontró una función de manejo, maneja el error
         handleErrorScan();
     }
 }
 
 main();
-

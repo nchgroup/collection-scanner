@@ -1,3 +1,6 @@
+// Suprimir advertencias de deprecación específicas
+process.noDeprecation = true;
+
 const newman = require('newman');
 const program = require('commander');
 const colors = require('colors/safe');
@@ -40,11 +43,23 @@ program
 
 
 const originalEmitWarning = process.emitWarning;
-process.emitWarning = (warning, ...args) => {
+process.emitWarning = (warning, type, code, ...args) => {
+    // Suprimir advertencias específicas de NODE_TLS_REJECT_UNAUTHORIZED
     if (typeof warning === 'string' && warning.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
         return;
     }
-    originalEmitWarning.call(process, warning, ...args)
+
+    // Suprimir advertencias de deprecación DEP0176 (fs.F_OK)
+    if (code === 'DEP0176' || (typeof warning === 'string' && warning.includes('DEP0176'))) {
+        return;
+    }
+
+    // Suprimir todas las advertencias de deprecación si es necesario
+    if (type === 'DeprecationWarning') {
+        return;
+    }
+
+    originalEmitWarning.call(process, warning, type, code, ...args);
 };
 
 // Proceso de configuración del proxy y el entorno
@@ -135,7 +150,13 @@ const handleNoAuth = () => {
             const responseCode = args.response.code;
             const responseStatus = args.response.status;
 
-            if (responseCode < 200 || responseCode > 299) {
+            // En el contexto de no-auth, códigos como 401, 403 son "buenos" resultados
+            // porque indican que la autenticación es requerida
+            if (responseCode === 401 || responseCode === 403) {
+                console.log(colors.green(`+ ${responseCode} ${responseStatus}`));
+                console.log(`\t${args.request.url.toString()}`);
+            } else if (responseCode >= 200 && responseCode < 300) {
+                // Códigos 2xx son "malos" en este contexto porque indican acceso sin auth
                 console.log(colors.red(`- ${responseCode} ${responseStatus}`));
 
                 // Busca el header de autorización
@@ -143,12 +164,14 @@ const handleNoAuth = () => {
 
                 // Verifica si el header de autorización existe y tiene un valor
                 if (authHeader && authHeader.value !== "") {
-                    console.log('[*] curl -X %s %s -H "Authorization: %s"', args.request.method, args.request.url.toString(), authHeader.value);
+                    console.log('\tcurl -X %s %s -H "Authorization: %s"', args.request.method, args.request.url.toString(), authHeader.value);
                 } else {
-                    console.log('[*] curl -X %s %s', args.request.method, args.request.url.toString());
+                    console.log('\tcurl -X %s %s', args.request.method, args.request.url.toString());
                 }
             } else {
-                console.log(colors.green(`+ ${responseCode} ${responseStatus}`));
+                // Otros códigos de error (4xx, 5xx excepto 401/403)
+                console.log(colors.yellow(`? ${responseCode} ${responseStatus}`));
+                console.log(`\t${args.request.url.toString()}`);
             }
         });
 };

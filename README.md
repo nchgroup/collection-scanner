@@ -14,8 +14,10 @@ Options:
   -c, --collection <type>     Path to the Postman collection
   -e, --environment <type>    Path to the Postman environment
   -A, --authorization <type>  Token to use for authentication
-  -x, --proxy <type>          Proxy to use for requests
+  -x, --proxy <type>          Proxy to use for requests (format: http://proxy:port or
+                              http://user:pass@proxy:port)
   -s, --scan <type>           Scan type, please choice: {run, extract-url, no-auth, cors}
+  -r, --response <type>       Show response body with character limit (0 = no limit)
   -k, --insecure              Allow insecure server connections
   -v, --verbose               Verbose output
   -h, --help                  display help for command
@@ -28,30 +30,17 @@ git clone https://gitlab.com/vay3t/collection-scanner.git
 cd collection-scanner/src
 npm install .
 ```
-## Build docker
-
-```bash
-cd collection-scanner/
-bash docker-build.sh
-```
 
 # Run
 
 ```bash
-cd collection-scanner/src
-node cli.js -c ../collections/project.postman_collection.json -e ../environments/project.postman_environment.json -x http://127.0.0.1:8080 -s no-auth
-```
-
-## Run with Docker
-
-```bash
-cd collection-scanner/
-docker run -v $(pwd)/input:/app/src/input collection-scanner -c /app/src/input/project.postman_collection.json -s no-auth
-```
-
-## Run development with Docker
-
-```bash
-cd collection-scanner/
-bash docker-build.sh && docker run -v $(pwd)/input:/app/src/input collection-scanner -c /app/src/input/project.postman_collection.json -s no-auth
+cd src
+node cli.js \
+    -c ../input/project.postman_collection.json \
+    -e ../input/project.postman_environment.json \
+    -x http://127.0.0.1:8080 \
+    -s no-auth \
+    -r 350 \
+    -k \
+    -v
 ```

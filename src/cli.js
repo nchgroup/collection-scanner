@@ -15,7 +15,8 @@ const config = {
     proxyURL: "",
     scanType: "",
     insecureReq: false,
-    verbose: false
+    verbose: false,
+    responseLimit: null
 };
 
 // Configuración del programa y manejo de argumentos
@@ -27,6 +28,7 @@ program
     .option('-A, --authorization <type>', 'Token to use for authentication')
     .option('-x, --proxy <type>', 'Proxy to use for requests (format: http://proxy:port or http://user:pass@proxy:port)')
     .option('-s, --scan <type>', 'Scan type, please choice: {run, extract-url, no-auth, cors}')
+    .option('-r, --response <type>', 'Show response body with character limit (0 = no limit)')
     .option('-k, --insecure', 'Allow insecure server connections')
     .option('-v, --verbose', 'Verbose output')
     .action((cmdObj) => {
@@ -35,6 +37,7 @@ program
         config.token = cmdObj.authorization;
         config.proxyURL = cmdObj.proxy;
         config.scanType = cmdObj.scan;
+        config.responseLimit = cmdObj.response ? parseInt(cmdObj.response) : null;
         config.insecureReq = cmdObj.insecure;
         config.verbose = cmdObj.verbose;
     })
@@ -90,6 +93,27 @@ if (config.insecureReq) {
 // Configurar proxy antes de ejecutar Newman
 setupProxy();
 
+// Función para formatear el response body según el límite de caracteres
+function formatResponseBody(responseBody, limit) {
+    if (!responseBody) return '';
+
+    const bodyStr = responseBody.toString();
+
+    if (limit === null || limit === undefined) {
+        return '';
+    }
+
+    if (limit === 0) {
+        return bodyStr;
+    }
+
+    if (bodyStr.length > limit) {
+        return bodyStr.substring(0, limit) + '...';
+    }
+
+    return bodyStr;
+}
+
 function handleErrorScan() {
     console.log(`${colors.red("[!] Invalid scan type")}, ${colors.yellow("please run command with --help flag to see available options")}`);
 }
@@ -127,7 +151,18 @@ const handleRun = () => {
                 console.log('No se recibió ninguna respuesta');
                 return;
             }
+
             console.log(`> ${args.request.method} ${args.request.url} - ${args.response.code} ${args.response.status}`);
+
+            // Mostrar response body si la opción -r está habilitada
+            if (config.responseLimit !== null) {
+                const responseBody = formatResponseBody(args.response.stream, config.responseLimit);
+                if (responseBody) {
+                    console.log(colors.cyan('Response Body:'));
+                    console.log(colors.gray(responseBody));
+                    console.log(''); // Línea en blanco para separar
+                }
+            }
         })
 }
 
@@ -186,6 +221,15 @@ const handleNoAuth = () => {
             if (responseCode === 401 || responseCode === 403) {
                 console.log(colors.green(`+ ${responseCode} ${responseStatus}`));
                 console.log(`\t${args.request.url.toString()}`);
+
+                // Mostrar response body si la opción -r está habilitada
+                if (config.responseLimit !== null) {
+                    const responseBody = formatResponseBody(args.response.stream, config.responseLimit);
+                    if (responseBody) {
+                        console.log(colors.cyan('\t\tResponse Body:'));
+                        console.log(colors.gray(`\t\t${responseBody.replace(/\n/g, '\n\t')}`));
+                    }
+                }
             } else if (responseCode >= 200 && responseCode < 300) {
                 // Códigos 2xx son "malos" en este contexto porque indican acceso sin auth
                 console.log(colors.red(`- ${responseCode} ${responseStatus}`));
@@ -197,10 +241,28 @@ const handleNoAuth = () => {
                 } else {
                     console.log('\tcurl -X %s %s', args.request.method, args.request.url.toString());
                 }
+
+                // Mostrar response body si la opción -r está habilitada
+                if (config.responseLimit !== null) {
+                    const responseBody = formatResponseBody(args.response.stream, config.responseLimit);
+                    if (responseBody) {
+                        console.log(colors.cyan('\t\tResponse Body:'));
+                        console.log(colors.gray(`\t\t${responseBody.replace(/\n/g, '\n\t')}`));
+                    }
+                }
             } else {
                 // Otros códigos de error (4xx, 5xx excepto 401/403)
                 console.log(colors.yellow(`? ${responseCode} ${responseStatus}`));
                 console.log(`\t${args.request.url.toString()}`);
+
+                // Mostrar response body si la opción -r está habilitada
+                if (config.responseLimit !== null) {
+                    const responseBody = formatResponseBody(args.response.stream, config.responseLimit);
+                    if (responseBody) {
+                        console.log(colors.cyan('\t\tResponse Body:'));
+                        console.log(colors.gray(`\t\t${responseBody.replace(/\n/g, '\n\t')}`));
+                    }
+                }
             }
         });
 };
@@ -242,8 +304,28 @@ const handleCors = () => {
 
             if (corsHeader && corsHeader.value === 'https://evil.tld') {
                 console.log(colors.green(`+ Potencial CORS en el endpoint: ${args.request.url}`));
+
+                // Mostrar response body si la opción -r está habilitada
+                if (config.responseLimit !== null) {
+                    const responseBody = formatResponseBody(args.response.stream, config.responseLimit);
+                    if (responseBody) {
+                        console.log(colors.cyan('Response Body:'));
+                        console.log(colors.gray(responseBody));
+                        console.log(''); // Línea en blanco para separar
+                    }
+                }
             } else {
                 console.log(colors.red(`- No se encontró CORS en el endpoint: ${args.request.url}`));
+
+                // Mostrar response body si la opción -r está habilitada
+                if (config.responseLimit !== null) {
+                    const responseBody = formatResponseBody(args.response.stream, config.responseLimit);
+                    if (responseBody) {
+                        console.log(colors.cyan('Response Body:'));
+                        console.log(colors.gray(responseBody));
+                        console.log(''); // Línea en blanco para separar
+                    }
+                }
             }
         })
 };
@@ -268,6 +350,7 @@ function main() {
         console.log(colors.cyan(`  - Proxy: ${config.proxyURL || 'No configurado'}`));
         console.log(colors.cyan(`  - Scan Type: ${config.scanType}`));
         console.log(colors.cyan(`  - Insecure: ${config.insecureReq}`));
+        console.log(colors.cyan(`  - Response Limit: ${config.responseLimit !== null ? (config.responseLimit === 0 ? 'Sin límite' : config.responseLimit + ' caracteres') : 'Deshabilitado'}`));
         console.log("");
     }
 

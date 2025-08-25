@@ -14,10 +14,11 @@ Options:
   -c, --collection <type>     Path to the Postman collection
   -e, --environment <type>    Path to the Postman environment
   -A, --authorization <type>  Token to use for authentication
-  -x, --proxy <type>          Proxy to use for requests (format: http://proxy:port or
-                              http://user:pass@proxy:port)
-  -s, --scan <type>           Scan type, please choice: {run, extract-url, no-auth, cors}
+  -x, --proxy <type>          Proxy to use for requests (format: http://proxy:port or http://user:pass@proxy:port)
+  -s, --scan <type>           Scan type, please choice: {run, extract-urls, no-auth, cors, ratelimit}
   -r, --response <type>       Show response body with character limit (0 = no limit)
+  -t, --threads <type>        Number of concurrent threads (default: 1)
+  --repeat <type>             Number of times to repeat each request (for ratelimit scan, default: 1)
   -k, --insecure              Allow insecure server connections
   -v, --verbose               Verbose output
   -h, --help                  display help for command
@@ -26,7 +27,7 @@ Options:
 # Install
 
 ```bash
-git clone https://gitlab.com/vay3t/collection-scanner.git
+git clone https://gitlab.com/nchgroup/collection-scanner.git
 cd collection-scanner/src
 npm install .
 ```
@@ -36,8 +37,8 @@ npm install .
 ```bash
 cd src
 node cli.js \
-    -c ../input/project.postman_collection.json \
-    -e ../input/project.postman_environment.json \
+    -c ../project.postman_collection.json \
+    -e ../project.postman_environment.json \
     -x http://127.0.0.1:8080 \
     -s no-auth \
     -r 350 \

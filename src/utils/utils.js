@@ -31,6 +31,32 @@ class ResponseUtils {
     }
 
     /**
+     * Returns the response body as a structured object for JSON reporting.
+     * @param {*} responseBody - Cuerpo de la respuesta
+     * @param {number|null} limit - Límite de caracteres
+     * @returns {{ body: string|null, truncated: boolean }}
+     */
+    static getResponseBody(responseBody, limit) {
+        if (!responseBody) return { body: null, truncated: false };
+
+        const bodyStr = responseBody.toString();
+
+        if (limit === null || limit === undefined) {
+            return { body: null, truncated: false };
+        }
+
+        if (limit === 0) {
+            return { body: bodyStr, truncated: false };
+        }
+
+        if (bodyStr.length > limit) {
+            return { body: bodyStr.substring(0, limit), truncated: true };
+        }
+
+        return { body: bodyStr, truncated: false };
+    }
+
+    /**
      * Muestra el cuerpo de respuesta formateado
      * @param {*} responseBody - Cuerpo de la respuesta
      * @param {number|null} responseLimit - Límite de caracteres

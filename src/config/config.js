@@ -15,6 +15,8 @@ class Config {
         this.responseLimit = null;
         this.threads = 1;
         this.repeat = 1;
+        this.jsonOutput = false;
+        this.reporter = null;
     }
 
     /**

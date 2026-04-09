@@ -6,6 +6,7 @@ const colors = require('colors/safe');
 const Config = require('./config/config');
 const ScannerFactory = require('./scanners/ScannerFactory');
 const { ProxyUtils } = require('./utils/utils');
+const ScanReporter = require('./utils/reporter');
 
 const nameProject = "Postman Collection Scanner";
 
@@ -56,6 +57,7 @@ class CollectionScannerCLI {
             .option('--repeat <type>', 'Number of times to repeat each request (for ratelimit scan, default: 1)')
             .option('-k, --insecure', 'Allow insecure server connections')
             .option('-v, --verbose', 'Verbose output')
+            .option('-j, --json', 'Output results as structured JSON (suppresses colored output)')
             .action((cmdObj) => {
                 this.updateConfigFromCommand(cmdObj);
             })
@@ -77,7 +79,8 @@ class CollectionScannerCLI {
             threads: cmdObj.threads ? parseInt(cmdObj.threads) : 1,
             repeat: cmdObj.repeat ? parseInt(cmdObj.repeat) : 1,
             insecureReq: cmdObj.insecure,
-            verbose: cmdObj.verbose
+            verbose: cmdObj.verbose,
+            jsonOutput: !!cmdObj.json
         });
     }
 
@@ -116,6 +119,7 @@ class CollectionScannerCLI {
      * Muestra información de debug si está habilitada
      */
     displayDebugInfo() {
+        if (this.config.jsonOutput) return;
         if (this.config.verbose || this.config.proxyURL || this.config.threads > 1) {
             this.config.display();
         }
@@ -137,19 +141,32 @@ class CollectionScannerCLI {
      */
     async executeScanner() {
         try {
-            const scanner = ScannerFactory.createScanner(this.config.scanType, this.config);
-
-            console.log(colors.green(`>>> Running collection scanner: ${this.config.scanType}`));
-
-            if (this.config.threads > 1) {
-                console.log(colors.yellow(`>>> Using ${this.config.threads} parallel threads`));
+            // Attach reporter to config when JSON mode is active
+            if (this.config.jsonOutput) {
+                this.config.reporter = new ScanReporter(this.config);
             }
 
-            if (this.config.proxyURL && this.config.verbose) {
-                console.log(colors.yellow(`>>> Using proxy: ${this.config.proxyURL}`));
+            const scanner = ScannerFactory.createScanner(this.config.scanType, this.config);
+
+            if (!this.config.jsonOutput) {
+                console.log(colors.green(`>>> Running collection scanner: ${this.config.scanType}`));
+
+                if (this.config.threads > 1) {
+                    console.log(colors.yellow(`>>> Using ${this.config.threads} parallel threads`));
+                }
+
+                if (this.config.proxyURL && this.config.verbose) {
+                    console.log(colors.yellow(`>>> Using proxy: ${this.config.proxyURL}`));
+                }
             }
 
             await scanner.run();
+
+            // Emit JSON report when done
+            if (this.config.jsonOutput && this.config.reporter) {
+                this.config.reporter.complete();
+                this.config.reporter.print();
+            }
 
         } catch (error) {
             if (error.message.includes('Unknown scan type')) {
@@ -167,7 +184,9 @@ class CollectionScannerCLI {
      * Ejecuta la aplicación principal
      */
     async run() {
-        console.log(colors.bold("[+] Running " + nameProject + "\n"));
+        if (!this.config.jsonOutput) {
+            console.log(colors.bold("[+] Running " + nameProject + "\n"));
+        }
 
         // Validar configuración
         if (!this.validateConfig()) {

@@ -41,11 +41,38 @@ class ExtractUrlScanner extends BaseScanner {
         }
 
         const url = args.request.url.toString();
-        this.uniqueUrls[url] = (this.uniqueUrls[url] || 0) + 1;
+        const method = args.request.method;
+        const name = requestItem ? requestItem.name : (args.item ? args.item.name : url);
+        const fullName = requestItem ? requestItem.fullName : name;
+
+        if (!this.uniqueUrls[url]) {
+            this.uniqueUrls[url] = { method, name, fullName, count: 0 };
+        }
+        this.uniqueUrls[url].count++;
     }
 
     displayResults() {
         const urls = Object.keys(this.uniqueUrls);
+
+        if (this.config.jsonOutput && this.config.reporter) {
+            urls.forEach(url => {
+                const entry = this.uniqueUrls[url];
+                this.config.reporter.addFinding({
+                    endpoint: {
+                        name: entry.name,
+                        full_name: entry.fullName,
+                        method: entry.method,
+                        url
+                    },
+                    result: {
+                        status: 'info',
+                        type: 'URL_DISCOVERED',
+                        description: 'Endpoint discovered in collection'
+                    }
+                });
+            });
+            return;
+        }
 
         if (this.config.threads > 1) {
             console.log(colors.green('\n[+] Extracción de URLs completada:'));

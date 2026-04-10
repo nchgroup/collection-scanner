@@ -17,12 +17,14 @@ class RateLimitScanner extends BaseScanner {
         const collection = require(collectionPath);
         const requests = CollectionUtils.extractRequestsFromCollection(collection);
 
-        console.log(colors.cyan(`[INFO] Probando rate limit en ${requests.length} endpoints con ${this.config.repeat} repeticiones por endpoint`));
+        if (!this.config.jsonOutput) {
+            console.log(colors.cyan(`[INFO] Probando rate limit en ${requests.length} endpoints con ${this.config.repeat} repeticiones por endpoint`));
 
-        if (this.config.threads > 1) {
-            console.log(colors.cyan(`[INFO] Usando ${this.config.threads} threads paralelos para las repeticiones de cada endpoint\n`));
-        } else {
-            console.log(colors.cyan(`[INFO] Ejecución secuencial\n`));
+            if (this.config.threads > 1) {
+                console.log(colors.cyan(`[INFO] Usando ${this.config.threads} threads paralelos para las repeticiones de cada endpoint\n`));
+            } else {
+                console.log(colors.cyan(`[INFO] Ejecución secuencial\n`));
+            }
         }
 
         // Procesar endpoints de forma secuencial
@@ -30,11 +32,15 @@ class RateLimitScanner extends BaseScanner {
             await this.processEndpoint(collection, requestItem);
         }
 
-        console.log(colors.green('\n[+] Prueba de rate limit completada'));
+        if (!this.config.jsonOutput) {
+            console.log(colors.green('\n[+] Prueba de rate limit completada'));
+        }
     }
 
     async processEndpoint(collection, requestItem) {
-        console.log(colors.yellow(`\n>>> Probando endpoint: ${requestItem.fullName}`));
+        if (!this.config.jsonOutput) {
+            console.log(colors.yellow(`\n>>> Probando endpoint: ${requestItem.fullName}`));
+        }
         const responseTimesList = [];
         let rateLimitDetected = false;
         const endpointStats = {
@@ -85,7 +91,9 @@ class RateLimitScanner extends BaseScanner {
     }
 
     async processEndpointParallel(collection, requestItem, responseTimesList, rateLimitDetected, endpointStats) {
-        console.log(colors.cyan(`\tEjecutando ${this.config.repeat} repeticiones con ${this.config.threads} threads paralelos`));
+        if (!this.config.jsonOutput) {
+            console.log(colors.cyan(`\tEjecutando ${this.config.repeat} repeticiones con ${this.config.threads} threads paralelos`));
+        }
 
         // Crear array de tareas para las repeticiones
         const repeatTasks = Array.from({ length: this.config.repeat }, (_, i) => i + 1);
@@ -137,6 +145,8 @@ class RateLimitScanner extends BaseScanner {
     }
 
     async executeRequest(collection, requestItem, repeatIndex) {
+        const silent = this.config.jsonOutput;
+
         return new Promise((resolve) => {
             const singleRequestCollection = CollectionUtils.createSingleRequestCollection(collection, requestItem);
             const startTime = Date.now();
@@ -149,13 +159,13 @@ class RateLimitScanner extends BaseScanner {
             })
                 .on('request', (err, args) => {
                     if (err) {
-                        console.error(`[${repeatIndex}/${this.config.repeat}] Error en la solicitud: ${err}`);
+                        if (!silent) console.error(`[${repeatIndex}/${this.config.repeat}] Error en la solicitud: ${err}`);
                         resolve({ error: true });
                         return;
                     }
 
                     if (!args.response) {
-                        console.log(`[${repeatIndex}/${this.config.repeat}] No se recibió ninguna respuesta`);
+                        if (!silent) console.log(`[${repeatIndex}/${this.config.repeat}] No se recibió ninguna respuesta`);
                         resolve({ error: true });
                         return;
                     }
@@ -172,18 +182,24 @@ class RateLimitScanner extends BaseScanner {
                         url: args.request.url
                     };
 
-                    console.log(`[${repeatIndex}/${this.config.repeat}] ${args.request.method} ${args.request.url} - ${args.response.code} ${args.response.status} (${responseTime}ms)`);
+                    if (!silent) {
+                        console.log(`[${repeatIndex}/${this.config.repeat}] ${args.request.method} ${args.request.url} - ${args.response.code} ${args.response.status} (${responseTime}ms)`);
+                    }
 
                     // Verificar si es 429 (Too Many Requests) - Rate limit activado
                     if (args.response.code === 429) {
-                        console.log(colors.red(`\t[-] RATE LIMIT DETECTADO - Endpoint bloqueado por exceso de solicitudes`));
-                        console.log(colors.yellow(`\t--> Pasando al siguiente endpoint...`));
+                        if (!silent) {
+                            console.log(colors.red(`\t[-] RATE LIMIT DETECTADO - Endpoint bloqueado por exceso de solicitudes`));
+                            console.log(colors.yellow(`\t--> Pasando al siguiente endpoint...`));
+                        }
                         resolve({ rateLimited: true, responseTime, requestInfo });
                         return;
                     }
 
                     // Mostrar response body si la opción -r está habilitada
-                    this.displayResponseBody(args.response.stream, `[${repeatIndex}/${this.config.repeat}] `);
+                    if (!silent) {
+                        this.displayResponseBody(args.response.stream, `[${repeatIndex}/${this.config.repeat}] `);
+                    }
 
                     resolve({ responseTime, success: true, requestInfo });
                 })
@@ -191,13 +207,52 @@ class RateLimitScanner extends BaseScanner {
                     // El resolve ya se llamó en el 'request' event
                 })
                 .on('error', (err) => {
-                    console.error(`[${repeatIndex}/${this.config.repeat}] Error: ${err}`);
+                    if (!silent) console.error(`[${repeatIndex}/${this.config.repeat}] Error: ${err}`);
                     resolve({ error: true });
                 });
         });
     }
 
     displayEndpointStatistics(requestItem, responseTimesList, rateLimitDetected, endpointStats) {
+        if (this.config.jsonOutput && this.config.reporter) {
+            const hasStats = responseTimesList.length > 0;
+            const avgTime = hasStats
+                ? responseTimesList.reduce((a, b) => a + b, 0) / responseTimesList.length
+                : null;
+
+            this.config.reporter.addFinding({
+                endpoint: {
+                    name: requestItem.name,
+                    full_name: requestItem.fullName,
+                    method: endpointStats.method || null,
+                    url: endpointStats.url ? endpointStats.url.toString() : null
+                },
+                result: {
+                    status: rateLimitDetected ? 'protected' : 'vulnerable',
+                    severity: rateLimitDetected ? 'none' : 'medium',
+                    type: 'MISSING_RATE_LIMIT',
+                    description: rateLimitDetected
+                        ? `Rate limiting detected — endpoint blocked after excessive requests`
+                        : `No rate limiting detected after ${responseTimesList.length} requests`,
+                    rate_limited: rateLimitDetected,
+                    statistics: {
+                        requests_sent: this.config.repeat,
+                        requests_completed: responseTimesList.length,
+                        avg_response_ms: hasStats ? parseFloat(avgTime.toFixed(2)) : null,
+                        min_response_ms: hasStats ? Math.min(...responseTimesList) : null,
+                        max_response_ms: hasStats ? Math.max(...responseTimesList) : null,
+                        started_at: endpointStats.startTime
+                            ? new Date(endpointStats.startTime).toISOString()
+                            : null,
+                        completed_at: endpointStats.endTime
+                            ? new Date(endpointStats.endTime).toISOString()
+                            : null
+                    }
+                }
+            });
+            return;
+        }
+
         if (rateLimitDetected) {
             console.log(colors.red(`>>> ${requestItem.fullName}: RATE LIMIT ACTIVADO - No se completaron todas las repeticiones`));
         } else if (responseTimesList.length > 0) {

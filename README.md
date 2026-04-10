@@ -21,6 +21,7 @@ Options:
   --repeat <type>             Number of times to repeat each request (for ratelimit scan, default: 1)
   -k, --insecure              Allow insecure server connections
   -v, --verbose               Verbose output
+  -j, --json                  Output results as structured JSON (suppresses colored output)
   -h, --help                  display help for command
 ```
 
